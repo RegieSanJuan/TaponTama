@@ -1,108 +1,193 @@
-"use client"
+"use client";
 
-import { useState, useRef, useCallback } from "react"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Camera, Leaf, Trash2, Recycle, RotateCcw, Zap } from "lucide-react"
+import { useState, useRef, useCallback } from "react";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Camera, Leaf, Trash2, Recycle, RotateCcw, Zap } from "lucide-react";
 
-type WasteClassification = "biodegradable" | "non-biodegradable" | "recyclable"
+type WasteClassification = "biodegradable" | "non-biodegradable" | "recyclable";
 
 interface ClassificationResult {
-  type: WasteClassification
-  confidence: number
-  item: string
-  tips: string
+  type: WasteClassification;
+  confidence: number;
+  item: string;
+  tips: string;
 }
 
 export default function TaponTamaApp() {
-  const [isCapturing, setIsCapturing] = useState(false)
-  const [capturedImage, setCapturedImage] = useState<string | null>(null)
-  const [classification, setClassification] = useState<ClassificationResult | null>(null)
-  const [isAnalyzing, setIsAnalyzing] = useState(false)
-  const videoRef = useRef<HTMLVideoElement>(null)
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const streamRef = useRef<MediaStream | null>(null)
+  const [isCapturing, setIsCapturing] = useState(false);
+  const [capturedImage, setCapturedImage] = useState<string | null>(null);
+  const [classification, setClassification] =
+    useState<ClassificationResult | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
 
   const startCamera = useCallback(async () => {
     try {
+      // Check if getUserMedia is supported
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        alert(
+          "Camera is not supported in this browser. Please use a modern browser like Chrome, Firefox, or Safari."
+        );
+        return;
+      }
+
+      // Request camera permission with detailed constraints
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" },
-      })
-      streamRef.current = stream
+        video: {
+          facingMode: "environment", // Use back camera on mobile
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+      });
+
+      streamRef.current = stream;
       if (videoRef.current) {
-        videoRef.current.srcObject = stream
-        setIsCapturing(true)
+        videoRef.current.srcObject = stream;
+
+        // Wait for video to load before setting capturing state
+        videoRef.current.onloadedmetadata = () => {
+          setIsCapturing(true);
+        };
       }
     } catch (error) {
-      console.error("Error accessing camera:", error)
-      alert("Unable to access camera. Please ensure you have granted camera permissions.")
+      console.error("Error accessing camera:", error);
+
+      // Provide specific error messages based on error type
+      if (error instanceof Error) {
+        switch (error.name) {
+          case "NotAllowedError":
+            alert(
+              "Camera access was denied. Please allow camera permissions and try again."
+            );
+            break;
+          case "NotFoundError":
+            alert("No camera found on this device.");
+            break;
+          case "NotSupportedError":
+            alert("Camera is not supported in this browser.");
+            break;
+          case "OverconstrainedError":
+            alert(
+              "Camera constraints could not be satisfied. Trying with basic settings..."
+            );
+            // Fallback with simpler constraints
+            try {
+              const fallbackStream = await navigator.mediaDevices.getUserMedia({
+                video: true,
+              });
+              streamRef.current = fallbackStream;
+              if (videoRef.current) {
+                videoRef.current.srcObject = fallbackStream;
+                videoRef.current.onloadedmetadata = () => {
+                  setIsCapturing(true);
+                };
+              }
+            } catch (fallbackError) {
+              alert("Unable to access camera even with basic settings.");
+            }
+            break;
+          default:
+            alert(
+              `Unable to access camera: ${error.message}. Please ensure you have granted camera permissions and are using HTTPS.`
+            );
+        }
+      } else {
+        alert(
+          "Unable to access camera. Please ensure you have granted camera permissions."
+        );
+      }
     }
-  }, [])
+  }, []);
 
   const stopCamera = useCallback(() => {
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop())
-      streamRef.current = null
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
     }
-    setIsCapturing(false)
-  }, [])
+    setIsCapturing(false);
+  }, []);
 
   const captureImage = useCallback(() => {
     if (videoRef.current && canvasRef.current) {
-      const canvas = canvasRef.current
-      const video = videoRef.current
-      const context = canvas.getContext("2d")
+      const canvas = canvasRef.current;
+      const video = videoRef.current;
+      const context = canvas.getContext("2d");
+
+      // Check if video is ready
+      if (video.videoWidth === 0 || video.videoHeight === 0) {
+        alert("Video is not ready yet. Please wait and try again.");
+        return;
+      }
 
       if (context) {
-        canvas.width = video.videoWidth
-        canvas.height = video.videoHeight
-        context.drawImage(video, 0, 0)
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
 
-        const imageDataUrl = canvas.toDataURL("image/jpeg")
-        setCapturedImage(imageDataUrl)
-        stopCamera()
-        analyzeWaste(imageDataUrl)
+        // Draw the video frame to canvas
+        context.drawImage(video, 0, 0);
+
+        // Convert to image data
+        const imageDataUrl = canvas.toDataURL("image/jpeg", 0.8); // Add quality parameter
+
+        console.log("Image captured, size:", imageDataUrl.length);
+
+        setCapturedImage(imageDataUrl);
+        stopCamera();
+        analyzeWaste(imageDataUrl);
+      } else {
+        alert("Unable to get canvas context. Please try again.");
       }
+    } else {
+      alert("Camera or canvas not ready. Please try again.");
     }
-  }, [stopCamera])
+  }, [stopCamera]);
 
   const analyzeWaste = useCallback(async (imageData: string) => {
-    setIsAnalyzing(true)
+    setIsAnalyzing(true);
 
     try {
       // Convert base64 to blob for API upload
-      const response = await fetch(imageData)
-      const blob = await response.blob()
+      const response = await fetch(imageData);
+      const blob = await response.blob();
 
       // Create FormData for Ximilar API
-      const formData = new FormData()
+      const formData = new FormData();
       formData.append(
         "records",
         JSON.stringify([
           {
             _base64: imageData.split(",")[1], // Remove data:image/jpeg;base64, prefix
           },
-        ]),
-      )
+        ])
+      );
 
       // Call Ximilar API (you'll need to replace with your actual API key and endpoint)
       const ximilarResponse = await fetch("/api/classify-waste", {
         method: "POST",
         body: formData,
-      })
+      });
 
       if (!ximilarResponse.ok) {
-        throw new Error("Classification failed")
+        throw new Error("Classification failed");
       }
 
-      const result = await ximilarResponse.json()
+      const result = await ximilarResponse.json();
 
       // Process Ximilar response and map to our waste categories
-      const processedResult = processXimilarResult(result)
-      setClassification(processedResult)
+      const processedResult = processXimilarResult(result);
+      setClassification(processedResult);
     } catch (error) {
-      console.error("Error analyzing waste:", error)
+      console.error("Error analyzing waste:", error);
 
       // Fallback to mock results if API fails
       const mockResults: ClassificationResult[] = [
@@ -124,17 +209,21 @@ export default function TaponTamaApp() {
           item: "Styrofoam container",
           tips: "This goes to general waste. Consider using reusable containers in the future!",
         },
-      ]
+      ];
 
-      const randomResult = mockResults[Math.floor(Math.random() * mockResults.length)]
-      setClassification(randomResult)
+      const randomResult =
+        mockResults[Math.floor(Math.random() * mockResults.length)];
+      setClassification(randomResult);
     }
 
-    setIsAnalyzing(false)
-  }, [])
+    setIsAnalyzing(false);
+  }, []);
 
   const processXimilarResult = (ximilarResult: any): ClassificationResult => {
-    const wasteMapping: Record<string, { type: WasteClassification; tips: string }> = {
+    const wasteMapping: Record<
+      string,
+      { type: WasteClassification; tips: string }
+    > = {
       plastic_bottle: {
         type: "recyclable",
         tips: "Clean and place in recycling bin. Check local recycling guidelines for proper disposal.",
@@ -187,31 +276,34 @@ export default function TaponTamaApp() {
         type: "non-biodegradable",
         tips: "This item should go in your general waste bin.",
       },
-    }
+    };
 
-    console.log("[v0] Processing Ximilar result:", ximilarResult)
+    console.log("[v0] Processing Ximilar result:", ximilarResult);
 
     // Extract the highest confidence prediction from Ximilar response
-    const predictions = ximilarResult.records?.[0]?.outputs || []
-    console.log("[v0] Predictions found:", predictions)
+    const predictions = ximilarResult.records?.[0]?.outputs || [];
+    console.log("[v0] Predictions found:", predictions);
 
     const topPrediction = predictions.reduce(
-      (max: any, current: any) => (current.prob > (max?.prob || 0) ? current : max),
-      null,
-    )
+      (max: any, current: any) =>
+        current.prob > (max?.prob || 0) ? current : max,
+      null
+    );
 
-    console.log("[v0] Top prediction:", topPrediction)
+    console.log("[v0] Top prediction:", topPrediction);
 
     if (topPrediction) {
-      const category = topPrediction.label.toLowerCase()
-      const mapping = wasteMapping[category] || wasteMapping["general_waste"] // Default fallback
+      const category = topPrediction.label.toLowerCase();
+      const mapping = wasteMapping[category] || wasteMapping["general_waste"]; // Default fallback
 
       return {
         type: mapping.type,
         confidence: Math.round(topPrediction.prob * 100),
-        item: topPrediction.label.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase()),
+        item: topPrediction.label
+          .replace(/_/g, " ")
+          .replace(/\b\w/g, (l: string) => l.toUpperCase()),
         tips: mapping.tips,
-      }
+      };
     }
 
     // Fallback if no prediction found
@@ -220,36 +312,36 @@ export default function TaponTamaApp() {
       confidence: 50,
       item: "Unknown item",
       tips: "Unable to classify this item. Please dispose of it responsibly.",
-    }
-  }
+    };
+  };
 
   const resetApp = useCallback(() => {
-    setCapturedImage(null)
-    setClassification(null)
-    setIsAnalyzing(false)
-  }, [])
+    setCapturedImage(null);
+    setClassification(null);
+    setIsAnalyzing(false);
+  }, []);
 
   const getClassificationIcon = (type: WasteClassification) => {
     switch (type) {
       case "biodegradable":
-        return <Leaf className="h-8 w-8 text-green-600" />
+        return <Leaf className="h-8 w-8 text-green-600" />;
       case "recyclable":
-        return <Recycle className="h-8 w-8 text-blue-600" />
+        return <Recycle className="h-8 w-8 text-blue-600" />;
       case "non-biodegradable":
-        return <Trash2 className="h-8 w-8 text-red-600" />
+        return <Trash2 className="h-8 w-8 text-red-600" />;
     }
-  }
+  };
 
   const getClassificationColor = (type: WasteClassification) => {
     switch (type) {
       case "biodegradable":
-        return "bg-green-100 text-green-800 border-green-200"
+        return "bg-green-100 text-green-800 border-green-200";
       case "recyclable":
-        return "bg-blue-100 text-blue-800 border-blue-200"
+        return "bg-blue-100 text-blue-800 border-blue-200";
       case "non-biodegradable":
-        return "bg-red-100 text-red-800 border-red-200"
+        return "bg-red-100 text-red-800 border-red-200";
     }
-  }
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -262,7 +354,9 @@ export default function TaponTamaApp() {
             </div>
             <div>
               <h1 className="text-2xl font-bold text-foreground">TaponTama</h1>
-              <p className="text-sm text-muted-foreground">Smart Waste Classification</p>
+              <p className="text-sm text-muted-foreground">
+                Smart Waste Classification
+              </p>
             </div>
           </div>
         </div>
@@ -275,7 +369,8 @@ export default function TaponTamaApp() {
               <CardHeader className="text-center">
                 <CardTitle className="text-xl">Identify Your Waste</CardTitle>
                 <CardDescription>
-                  Use your camera to classify waste as biodegradable, recyclable, or non-biodegradable
+                  Use your camera to classify waste as biodegradable,
+                  recyclable, or non-biodegradable
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -292,6 +387,31 @@ export default function TaponTamaApp() {
                   <Camera className="mr-2 h-5 w-5" />
                   Start Camera
                 </Button>
+
+                {/* Debug button for testing camera permissions */}
+                <Button
+                  onClick={async () => {
+                    try {
+                      const devices =
+                        await navigator.mediaDevices.enumerateDevices();
+                      const videoDevices = devices.filter(
+                        (device) => device.kind === "videoinput"
+                      );
+                      console.log("Available cameras:", videoDevices);
+                      alert(
+                        `Found ${videoDevices.length} camera(s). Check console for details.`
+                      );
+                    } catch (error) {
+                      console.error("Error checking devices:", error);
+                      alert("Cannot check camera devices");
+                    }
+                  }}
+                  variant="outline"
+                  className="w-full"
+                  size="sm"
+                >
+                  Test Camera Detection
+                </Button>
               </CardContent>
             </Card>
 
@@ -304,19 +424,25 @@ export default function TaponTamaApp() {
                   <div className="w-8 h-8 rounded-full bg-accent text-accent-foreground flex items-center justify-center text-sm font-semibold">
                     1
                   </div>
-                  <p className="text-sm text-muted-foreground">Point camera at waste item</p>
+                  <p className="text-sm text-muted-foreground">
+                    Point camera at waste item
+                  </p>
                 </div>
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 rounded-full bg-accent text-accent-foreground flex items-center justify-center text-sm font-semibold">
                     2
                   </div>
-                  <p className="text-sm text-muted-foreground">Capture the image</p>
+                  <p className="text-sm text-muted-foreground">
+                    Capture the image
+                  </p>
                 </div>
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 rounded-full bg-accent text-accent-foreground flex items-center justify-center text-sm font-semibold">
                     3
                   </div>
-                  <p className="text-sm text-muted-foreground">Get classification and disposal tips</p>
+                  <p className="text-sm text-muted-foreground">
+                    Get classification and disposal tips
+                  </p>
                 </div>
               </CardContent>
             </Card>
@@ -328,7 +454,27 @@ export default function TaponTamaApp() {
             <Card>
               <CardContent className="p-0">
                 <div className="relative">
-                  <video ref={videoRef} autoPlay playsInline className="w-full h-80 object-cover rounded-t-lg" />
+                  <video
+                    ref={videoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="w-full h-80 object-cover rounded-t-lg"
+                    onLoadedMetadata={() => {
+                      console.log("Video metadata loaded");
+                      if (videoRef.current) {
+                        console.log(
+                          "Video dimensions:",
+                          videoRef.current.videoWidth,
+                          "x",
+                          videoRef.current.videoHeight
+                        );
+                      }
+                    }}
+                    onError={(e) => {
+                      console.error("Video error:", e);
+                    }}
+                  />
                   <div className="absolute inset-0 border-2 border-dashed border-accent/50 rounded-t-lg pointer-events-none">
                     <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-white bg-black/50 px-3 py-1 rounded text-sm">
                       Center waste item in frame
@@ -344,7 +490,11 @@ export default function TaponTamaApp() {
                     <Zap className="mr-2 h-5 w-5" />
                     Capture & Analyze
                   </Button>
-                  <Button onClick={stopCamera} variant="outline" className="w-full bg-transparent">
+                  <Button
+                    onClick={stopCamera}
+                    variant="outline"
+                    className="w-full bg-transparent"
+                  >
                     Cancel
                   </Button>
                 </div>
@@ -366,31 +516,46 @@ export default function TaponTamaApp() {
                   {isAnalyzing ? (
                     <div className="text-center space-y-3">
                       <div className="animate-spin w-8 h-8 border-2 border-accent border-t-transparent rounded-full mx-auto"></div>
-                      <p className="text-sm text-muted-foreground">Analyzing waste with AI...</p>
+                      <p className="text-sm text-muted-foreground">
+                        Analyzing waste with AI...
+                      </p>
                     </div>
                   ) : classification ? (
                     <div className="space-y-4">
                       <div className="flex items-center gap-3">
                         {getClassificationIcon(classification.type)}
                         <div>
-                          <h3 className="font-semibold text-lg capitalize">{classification.type.replace("-", " ")}</h3>
+                          <h3 className="font-semibold text-lg capitalize">
+                            {classification.type.replace("-", " ")}
+                          </h3>
                           <p className="text-sm text-muted-foreground">
-                            {classification.item} • {classification.confidence}% confidence
+                            {classification.item} • {classification.confidence}%
+                            confidence
                           </p>
                         </div>
                       </div>
 
-                      <Badge className={`${getClassificationColor(classification.type)} px-3 py-1`} variant="outline">
+                      <Badge
+                        className={`${getClassificationColor(
+                          classification.type
+                        )} px-3 py-1`}
+                        variant="outline"
+                      >
                         {classification.type.replace("-", " ").toUpperCase()}
                       </Badge>
 
                       <div className="bg-muted p-3 rounded-lg">
                         <p className="text-sm text-muted-foreground">
-                          💡 <strong>Disposal Tip:</strong> {classification.tips}
+                          💡 <strong>Disposal Tip:</strong>{" "}
+                          {classification.tips}
                         </p>
                       </div>
 
-                      <Button onClick={resetApp} variant="outline" className="w-full bg-transparent">
+                      <Button
+                        onClick={resetApp}
+                        variant="outline"
+                        className="w-full bg-transparent"
+                      >
                         <RotateCcw className="mr-2 h-4 w-4" />
                         Analyze Another Item
                       </Button>
@@ -405,5 +570,5 @@ export default function TaponTamaApp() {
         <canvas ref={canvasRef} className="hidden" />
       </main>
     </div>
-  )
+  );
 }
