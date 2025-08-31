@@ -23,6 +23,7 @@ interface ClassificationResult {
 
 export default function TaponTamaApp() {
   const [isCapturing, setIsCapturing] = useState(false);
+  const [isInitializingCamera, setIsInitializingCamera] = useState(false);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [classification, setClassification] =
     useState<ClassificationResult | null>(null);
@@ -32,12 +33,15 @@ export default function TaponTamaApp() {
   const streamRef = useRef<MediaStream | null>(null);
 
   const startCamera = useCallback(async () => {
+    setIsInitializingCamera(true);
+
     try {
       // Check if getUserMedia is supported
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         alert(
           "Camera is not supported in this browser. Please use a modern browser like Chrome, Firefox, or Safari."
         );
+        setIsInitializingCamera(false);
         return;
       }
 
@@ -54,10 +58,33 @@ export default function TaponTamaApp() {
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
 
-        // Wait for video to load before setting capturing state
-        videoRef.current.onloadedmetadata = () => {
+        // Wait for video to load and then set capturing state
+        const handleLoadedMetadata = () => {
+          console.log("Video metadata loaded, starting capture mode");
           setIsCapturing(true);
+          setIsInitializingCamera(false);
+          // Remove the event listener after it fires
+          if (videoRef.current) {
+            videoRef.current.removeEventListener(
+              "loadedmetadata",
+              handleLoadedMetadata
+            );
+          }
         };
+
+        videoRef.current.addEventListener(
+          "loadedmetadata",
+          handleLoadedMetadata
+        );
+
+        // Fallback: if metadata doesn't load within 3 seconds, still show camera
+        setTimeout(() => {
+          if (streamRef.current && !isCapturing) {
+            console.log("Fallback: Setting capture mode after timeout");
+            setIsCapturing(true);
+            setIsInitializingCamera(false);
+          }
+        }, 3000);
       }
     } catch (error) {
       console.error("Error accessing camera:", error);
@@ -94,19 +121,23 @@ export default function TaponTamaApp() {
               }
             } catch (fallbackError) {
               alert("Unable to access camera even with basic settings.");
+              setIsInitializingCamera(false);
             }
             break;
           default:
             alert(
               `Unable to access camera: ${error.message}. Please ensure you have granted camera permissions and are using HTTPS.`
             );
+            setIsInitializingCamera(false);
         }
       } else {
         alert(
           "Unable to access camera. Please ensure you have granted camera permissions."
         );
+        setIsInitializingCamera(false);
       }
     }
+    setIsInitializingCamera(false);
   }, []);
 
   const stopCamera = useCallback(() => {
@@ -115,6 +146,7 @@ export default function TaponTamaApp() {
       streamRef.current = null;
     }
     setIsCapturing(false);
+    setIsInitializingCamera(false);
   }, []);
 
   const captureImage = useCallback(() => {
@@ -319,6 +351,8 @@ export default function TaponTamaApp() {
     setCapturedImage(null);
     setClassification(null);
     setIsAnalyzing(false);
+    setIsCapturing(false);
+    setIsInitializingCamera(false);
   }, []);
 
   const getClassificationIcon = (type: WasteClassification) => {
@@ -363,7 +397,7 @@ export default function TaponTamaApp() {
       </header>
 
       <main className="container mx-auto px-4 py-8 max-w-md">
-        {!isCapturing && !capturedImage && (
+        {!isCapturing && !capturedImage && !isInitializingCamera && (
           <div className="space-y-6">
             <Card>
               <CardHeader className="text-center">
@@ -383,34 +417,10 @@ export default function TaponTamaApp() {
                   onClick={startCamera}
                   className="w-full bg-accent hover:bg-accent/90 text-accent-foreground"
                   size="lg"
+                  disabled={isInitializingCamera}
                 >
                   <Camera className="mr-2 h-5 w-5" />
                   Start Camera
-                </Button>
-
-                {/* Debug button for testing camera permissions */}
-                <Button
-                  onClick={async () => {
-                    try {
-                      const devices =
-                        await navigator.mediaDevices.enumerateDevices();
-                      const videoDevices = devices.filter(
-                        (device) => device.kind === "videoinput"
-                      );
-                      console.log("Available cameras:", videoDevices);
-                      alert(
-                        `Found ${videoDevices.length} camera(s). Check console for details.`
-                      );
-                    } catch (error) {
-                      console.error("Error checking devices:", error);
-                      alert("Cannot check camera devices");
-                    }
-                  }}
-                  variant="outline"
-                  className="w-full"
-                  size="sm"
-                >
-                  Test Camera Detection
                 </Button>
               </CardContent>
             </Card>
@@ -443,6 +453,26 @@ export default function TaponTamaApp() {
                   <p className="text-sm text-muted-foreground">
                     Get classification and disposal tips
                   </p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {isInitializingCamera && (
+          <div className="space-y-4">
+            <Card>
+              <CardContent className="p-8 text-center">
+                <div className="space-y-4">
+                  <div className="animate-spin w-12 h-12 border-4 border-accent border-t-transparent rounded-full mx-auto"></div>
+                  <div>
+                    <h3 className="text-lg font-semibold mb-2">
+                      Starting Camera
+                    </h3>
+                    <p className="text-sm text-muted-foreground">
+                      Please allow camera permissions when prompted
+                    </p>
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -487,8 +517,8 @@ export default function TaponTamaApp() {
                     className="w-full bg-accent hover:bg-accent/90 text-accent-foreground"
                     size="lg"
                   >
-                    <Zap className="mr-2 h-5 w-5" />
-                    Capture & Analyze
+                    <Camera className="mr-2 h-5 w-5" />
+                    Capture Photo
                   </Button>
                   <Button
                     onClick={stopCamera}
