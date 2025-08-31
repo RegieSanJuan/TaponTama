@@ -58,33 +58,24 @@ export default function TaponTamaApp() {
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
 
-        // Wait for video to load and then set capturing state
-        const handleLoadedMetadata = () => {
-          console.log("Video metadata loaded, starting capture mode");
-          setIsCapturing(true);
-          setIsInitializingCamera(false);
-          // Remove the event listener after it fires
-          if (videoRef.current) {
-            videoRef.current.removeEventListener(
-              "loadedmetadata",
-              handleLoadedMetadata
-            );
-          }
+        // Simpler approach: set both states immediately and let video load
+        console.log("Stream assigned to video element");
+        setIsCapturing(true);
+        setIsInitializingCamera(false);
+
+        // Log when video actually starts playing
+        videoRef.current.onloadedmetadata = () => {
+          console.log(
+            "Video metadata loaded - dimensions:",
+            videoRef.current?.videoWidth,
+            "x",
+            videoRef.current?.videoHeight
+          );
         };
 
-        videoRef.current.addEventListener(
-          "loadedmetadata",
-          handleLoadedMetadata
-        );
-
-        // Fallback: if metadata doesn't load within 3 seconds, still show camera
-        setTimeout(() => {
-          if (streamRef.current && !isCapturing) {
-            console.log("Fallback: Setting capture mode after timeout");
-            setIsCapturing(true);
-            setIsInitializingCamera(false);
-          }
-        }, 3000);
+        videoRef.current.onplay = () => {
+          console.log("Video started playing");
+        };
       }
     } catch (error) {
       console.error("Error accessing camera:", error);
@@ -155,7 +146,6 @@ export default function TaponTamaApp() {
       const video = videoRef.current;
       const context = canvas.getContext("2d");
 
-      // Check if video is ready
       if (video.videoWidth === 0 || video.videoHeight === 0) {
         alert("Video is not ready yet. Please wait and try again.");
         return;
@@ -165,16 +155,13 @@ export default function TaponTamaApp() {
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
 
-        // Draw the video frame to canvas
         context.drawImage(video, 0, 0);
 
-        // Convert to image data
-        const imageDataUrl = canvas.toDataURL("image/jpeg", 0.8); // Add quality parameter
-
-        console.log("Image captured, size:", imageDataUrl.length);
-
+        const imageDataUrl = canvas.toDataURL("image/jpeg", 0.8);
         setCapturedImage(imageDataUrl);
-        stopCamera();
+
+        // ❌ remove this → stopCamera();
+        // ✅ keep camera live until user explicitly cancels or resets
         analyzeWaste(imageDataUrl);
       } else {
         alert("Unable to get canvas context. Please try again.");
@@ -182,7 +169,7 @@ export default function TaponTamaApp() {
     } else {
       alert("Camera or canvas not ready. Please try again.");
     }
-  }, [stopCamera]);
+  }, []);
 
   const analyzeWaste = useCallback(async (imageData: string) => {
     setIsAnalyzing(true);
@@ -379,226 +366,301 @@ export default function TaponTamaApp() {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b border-border bg-card">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center justify-center w-10 h-10 rounded-full bg-accent">
-              <Leaf className="h-6 w-6 text-accent-foreground" />
+      {/* Show header only when not capturing */}
+      {!isCapturing && (
+        <header className="border-b border-border bg-card">
+          <div className="container mx-auto px-4 py-4">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center justify-center w-10 h-10 rounded-full bg-accent">
+                <Leaf className="h-6 w-6 text-accent-foreground" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold text-foreground">
+                  TaponTama
+                </h1>
+                <p className="text-sm text-muted-foreground">
+                  Smart Waste Classification
+                </p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-2xl font-bold text-foreground">TaponTama</h1>
-              <p className="text-sm text-muted-foreground">
-                Smart Waste Classification
-              </p>
+          </div>
+        </header>
+      )}
+
+      {/* Fullscreen camera view */}
+      {isCapturing && (
+        <div 
+          className="fixed inset-0 z-50 bg-red-500"
+          style={{ 
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            width: '100vw',
+            height: '100vh',
+            zIndex: 9999
+          }}
+        >
+          {/* Debug info */}
+          <div className="absolute top-4 left-4 bg-black/80 text-white p-2 rounded text-xs z-50">
+            <div>isCapturing: {isCapturing.toString()}</div>
+            <div>hasStream: {(streamRef.current !== null).toString()}</div>
+            <div>videoSrc: {videoRef.current?.srcObject ? "assigned" : "none"}</div>
+            <div>Container visible: RED BACKGROUND should be visible</div>
+          </div>
+          
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            className="w-full h-full object-cover bg-blue-500"
+            style={{ 
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+              backgroundColor: 'blue'
+            }}
+            onLoadedMetadata={() => {
+              console.log("FULLSCREEN: Video metadata loaded");
+            }}
+            onPlay={() => {
+              console.log("FULLSCREEN: Video started playing");
+            }}
+            onError={(e) => {
+              console.error("FULLSCREEN: Video error:", e);
+            }}
+          />
+
+          {/* Camera controls overlay */}
+          <div className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-black/80 to-transparent">
+            <div className="flex flex-col space-y-4">
+              <Button
+                onClick={captureImage}
+                className="w-full bg-white text-black hover:bg-gray-200"
+                size="lg"
+              >
+                <Camera className="mr-2 h-6 w-6" />
+                Capture Photo
+              </Button>
+              
+              {/* Debug button */}
+              <Button
+                onClick={() => {
+                  console.log("Force play attempt");
+                  if (videoRef.current) {
+                    console.log("Video element exists:", videoRef.current);
+                    console.log("Video srcObject:", videoRef.current.srcObject);
+                    console.log("Video readyState:", videoRef.current.readyState);
+                    videoRef.current.play().catch(e => console.error("Play failed:", e));
+                  }
+                }}
+                className="w-full bg-yellow-500 text-black hover:bg-yellow-400"
+                size="sm"
+              >
+                Force Play
+              </Button>
+              
+              <Button
+                onClick={stopCamera}
+                variant="outline"
+                className="w-full border-white text-white hover:bg-white/10"
+              >
+                Cancel
+              </Button>
             </div>
           </div>
         </div>
-      </header>
+      )}
 
-      <main className="container mx-auto px-4 py-8 max-w-md">
-        {!isCapturing && !capturedImage && !isInitializingCamera && (
-          <div className="space-y-6">
-            <Card>
-              <CardHeader className="text-center">
-                <CardTitle className="text-xl">Identify Your Waste</CardTitle>
-                <CardDescription>
-                  Use your camera to classify waste as biodegradable,
-                  recyclable, or non-biodegradable
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex justify-center">
-                  <div className="w-32 h-32 rounded-full bg-accent/10 flex items-center justify-center">
-                    <Camera className="h-16 w-16 text-accent" />
-                  </div>
-                </div>
-                <Button
-                  onClick={startCamera}
-                  className="w-full bg-accent hover:bg-accent/90 text-accent-foreground"
-                  size="lg"
-                  disabled={isInitializingCamera}
-                >
-                  <Camera className="mr-2 h-5 w-5" />
-                  Start Camera
-                </Button>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">How it works</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-accent text-accent-foreground flex items-center justify-center text-sm font-semibold">
-                    1
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    Point camera at waste item
-                  </p>
-                </div>
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-accent text-accent-foreground flex items-center justify-center text-sm font-semibold">
-                    2
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    Capture the image
-                  </p>
-                </div>
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-accent text-accent-foreground flex items-center justify-center text-sm font-semibold">
-                    3
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    Get classification and disposal tips
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        )}
-
-        {isInitializingCamera && (
-          <div className="space-y-4">
-            <Card>
-              <CardContent className="p-8 text-center">
-                <div className="space-y-4">
-                  <div className="animate-spin w-12 h-12 border-4 border-accent border-t-transparent rounded-full mx-auto"></div>
-                  <div>
-                    <h3 className="text-lg font-semibold mb-2">
-                      Starting Camera
-                    </h3>
-                    <p className="text-sm text-muted-foreground">
-                      Please allow camera permissions when prompted
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        )}
-
-        {isCapturing && (
-          <div className="space-y-4">
-            <Card>
-              <CardContent className="p-0">
-                <div className="relative">
-                  <video
-                    ref={videoRef}
-                    autoPlay
-                    playsInline
-                    muted
-                    className="w-full h-80 object-cover rounded-t-lg"
-                    onLoadedMetadata={() => {
-                      console.log("Video metadata loaded");
-                      if (videoRef.current) {
-                        console.log(
-                          "Video dimensions:",
-                          videoRef.current.videoWidth,
-                          "x",
-                          videoRef.current.videoHeight
-                        );
-                      }
-                    }}
-                    onError={(e) => {
-                      console.error("Video error:", e);
-                    }}
-                  />
-                  <div className="absolute inset-0 border-2 border-dashed border-accent/50 rounded-t-lg pointer-events-none">
-                    <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-white bg-black/50 px-3 py-1 rounded text-sm">
-                      Center waste item in frame
+      {/* Regular content when not capturing */}
+      {!isCapturing && (
+        <main className="container mx-auto px-4 py-8 max-w-md">
+          {!capturedImage && !isInitializingCamera && (
+            <div className="space-y-6">
+              <Card>
+                <CardHeader className="text-center">
+                  <CardTitle className="text-xl">Identify Your Waste</CardTitle>
+                  <CardDescription>
+                    Use your camera to classify waste as biodegradable,
+                    recyclable, or non-biodegradable
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex justify-center">
+                    <div className="w-32 h-32 rounded-full bg-accent/10 flex items-center justify-center">
+                      <Camera className="h-16 w-16 text-accent" />
                     </div>
                   </div>
-                </div>
-                <div className="p-4 space-y-3">
                   <Button
-                    onClick={captureImage}
+                    onClick={startCamera}
                     className="w-full bg-accent hover:bg-accent/90 text-accent-foreground"
                     size="lg"
+                    disabled={isInitializingCamera}
                   >
                     <Camera className="mr-2 h-5 w-5" />
-                    Capture Photo
+                    Start Camera
                   </Button>
-                  <Button
-                    onClick={stopCamera}
-                    variant="outline"
-                    className="w-full bg-transparent"
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        )}
+                </CardContent>
+              </Card>
 
-        {capturedImage && (
-          <div className="space-y-4">
-            <Card>
-              <CardContent className="p-0">
-                <img
-                  src={capturedImage || "/placeholder.svg"}
-                  alt="Captured waste"
-                  className="w-full h-64 object-cover rounded-t-lg"
-                />
-                <div className="p-4">
-                  {isAnalyzing ? (
-                    <div className="text-center space-y-3">
-                      <div className="animate-spin w-8 h-8 border-2 border-accent border-t-transparent rounded-full mx-auto"></div>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">How it works</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-accent text-accent-foreground flex items-center justify-center text-sm font-semibold">
+                      1
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      Point camera at waste item
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-accent text-accent-foreground flex items-center justify-center text-sm font-semibold">
+                      2
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      Capture the image
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-accent text-accent-foreground flex items-center justify-center text-sm font-semibold">
+                      3
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      Get classification and disposal tips
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          {isInitializingCamera && (
+            <div className="space-y-4">
+              <Card>
+                <CardContent className="p-8 text-center">
+                  <div className="space-y-4">
+                    <div className="animate-spin w-12 h-12 border-4 border-accent border-t-transparent rounded-full mx-auto"></div>
+                    <div>
+                      <h3 className="text-lg font-semibold mb-2">
+                        Starting Camera
+                      </h3>
                       <p className="text-sm text-muted-foreground">
-                        Analyzing waste with AI...
+                        Please allow camera permissions when prompted
                       </p>
                     </div>
-                  ) : classification ? (
-                    <div className="space-y-4">
-                      <div className="flex items-center gap-3">
-                        {getClassificationIcon(classification.type)}
-                        <div>
-                          <h3 className="font-semibold text-lg capitalize">
-                            {classification.type.replace("-", " ")}
-                          </h3>
-                          <p className="text-sm text-muted-foreground">
-                            {classification.item} • {classification.confidence}%
-                            confidence
-                          </p>
-                        </div>
-                      </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
 
-                      <Badge
-                        className={`${getClassificationColor(
-                          classification.type
-                        )} px-3 py-1`}
-                        variant="outline"
-                      >
-                        {classification.type.replace("-", " ").toUpperCase()}
-                      </Badge>
+          {isCapturing && (
+            <div className="space-y-4">
+              <Card>
+                <CardContent className="p-0">
+                  <div className="relative">
+                    <video
+                      ref={videoRef}
+                      autoPlay
+                      playsInline
+                      muted
+                      className="w-full h-80 object-cover rounded-t-lg bg-black"
+                    />
+                  </div>
+                  <div className="p-4 space-y-3">
+                    <Button
+                      onClick={captureImage}
+                      className="w-full bg-accent hover:bg-accent/90 text-accent-foreground"
+                      size="lg"
+                    >
+                      <Camera className="mr-2 h-5 w-5" />
+                      Capture Photo
+                    </Button>
+                    <Button
+                      onClick={stopCamera}
+                      variant="outline"
+                      className="w-full"
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
 
-                      <div className="bg-muted p-3 rounded-lg">
+          {capturedImage && (
+            <div className="space-y-4">
+              <Card>
+                <CardContent className="p-0">
+                  <img
+                    src={capturedImage || "/placeholder.svg"}
+                    alt="Captured waste"
+                    className="w-full h-64 object-cover rounded-t-lg"
+                  />
+                  <div className="p-4">
+                    {isAnalyzing ? (
+                      <div className="text-center space-y-3">
+                        <div className="animate-spin w-8 h-8 border-2 border-accent border-t-transparent rounded-full mx-auto"></div>
                         <p className="text-sm text-muted-foreground">
-                          💡 <strong>Disposal Tip:</strong>{" "}
-                          {classification.tips}
+                          Analyzing waste with AI...
                         </p>
                       </div>
+                    ) : classification ? (
+                      <div className="space-y-4">
+                        <div className="flex items-center gap-3">
+                          {getClassificationIcon(classification.type)}
+                          <div>
+                            <h3 className="font-semibold text-lg capitalize">
+                              {classification.type.replace("-", " ")}
+                            </h3>
+                            <p className="text-sm text-muted-foreground">
+                              {classification.item} •{" "}
+                              {classification.confidence}% confidence
+                            </p>
+                          </div>
+                        </div>
 
-                      <Button
-                        onClick={resetApp}
-                        variant="outline"
-                        className="w-full bg-transparent"
-                      >
-                        <RotateCcw className="mr-2 h-4 w-4" />
-                        Analyze Another Item
-                      </Button>
-                    </div>
-                  ) : null}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        )}
+                        <Badge
+                          className={`${getClassificationColor(
+                            classification.type
+                          )} px-3 py-1`}
+                          variant="outline"
+                        >
+                          {classification.type.replace("-", " ").toUpperCase()}
+                        </Badge>
 
-        <canvas ref={canvasRef} className="hidden" />
-      </main>
+                        <div className="bg-muted p-3 rounded-lg">
+                          <p className="text-sm text-muted-foreground">
+                            💡 <strong>Disposal Tip:</strong>{" "}
+                            {classification.tips}
+                          </p>
+                        </div>
+
+                        <Button
+                          onClick={resetApp}
+                          variant="outline"
+                          className="w-full bg-transparent"
+                        >
+                          <RotateCcw className="mr-2 h-4 w-4" />
+                          Analyze Another Item
+                        </Button>
+                      </div>
+                    ) : null}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          <canvas ref={canvasRef} className="hidden" />
+        </main>
+      )}
     </div>
   );
 }
